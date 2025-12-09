@@ -58,11 +58,13 @@ class AuthController extends ResourceController
     $token = createJWT($user);
 
     return $this->respond([
-      'token' => $token,
-      'user'  => [
-        'user_id' => $user['user_id'],
-        'name'    => $user['name'],
-        'email'   => $user['email']
+      'data' => [
+        'token' => $token,
+        'user'  => [
+          'user_id' => $user['user_id'],
+          'name'    => $user['name'],
+          'email'   => $user['email']
+        ]
       ]
     ]);
   }
