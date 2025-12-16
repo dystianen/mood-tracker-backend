@@ -14,6 +14,7 @@ $routes->group('api', function ($routes) {
   // MOOD CRUD (Protected)
   $routes->group('mood', ['filter' => 'auth'], function ($routes) {
     $routes->get('', 'MoodController::index');
+    $routes->get('recommendation', 'MoodController::recommendation');
     $routes->post('create', 'MoodController::create');
     $routes->get('(:segment)', 'MoodController::show/$1');
     $routes->put('update/(:segment)', 'MoodController::update/$1');

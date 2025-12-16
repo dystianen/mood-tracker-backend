@@ -68,7 +68,7 @@ class ReportController extends ResourceController
       ->where('user_id', $this->request->user->sub)
       ->where('MONTH(date)', $month)
       ->where('YEAR(date)', $year)
-      ->orderBy('date', 'ASC')
+      ->orderBy('date', 'DESC')
       ->findAll();
 
     return $this->respond([
