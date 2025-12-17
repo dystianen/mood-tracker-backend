@@ -233,7 +233,7 @@ class MoodController extends ResourceController
             - Hari dengan mood rendah: {$lowDays}
             - Kategori kondisi: {$level}
 
-            Berikan rekomendasi singkat (2–3 kalimat) dalam Bahasa Indonesia.
+            Berikan rekomendasi singkat (1–2 kalimat) dalam Bahasa Indonesia.
             Gunakan bahasa yang hangat, tidak menghakimi, dan praktis.
       ";
 
