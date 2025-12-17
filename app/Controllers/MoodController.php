@@ -90,15 +90,33 @@ class MoodController extends ResourceController
     $data = service('request')->getJSON(true);
     $userId = $this->request->user->sub;
 
-    $mood = $this->model->where('user_id', $userId)->find($id);
+    $mood = $this->model
+      ->where('user_id', $userId)
+      ->find($id);
+
     if (!$mood) {
       return $this->standardResponse(null, 'Mood tidak ditemukan', 'error', 404);
     }
 
-    $this->invalidateRecommendation($data['date']);
+    $oldMood = $mood['mood'];
+    $newMood = $data['mood'] ?? $oldMood;
+
+    $oldDate = $mood['date'];
+    $newDate = $data['date'] ?? $oldDate;
+
     $this->model->update($id, $data);
+
+    $shouldInvalidate =
+      $oldMood !== $newMood ||
+      date('Y-m', strtotime($oldDate)) !== date('Y-m', strtotime($newDate));
+
+    if ($shouldInvalidate) {
+      $this->invalidateRecommendation($newDate);
+    }
+
     return $this->standardResponse(null, 'Mood berhasil diperbarui');
   }
+
 
   public function delete($id = null)
   {
@@ -215,7 +233,7 @@ class MoodController extends ResourceController
             - Hari dengan mood rendah: {$lowDays}
             - Kategori kondisi: {$level}
 
-            Berikan rekomendasi singkat (1–2 kalimat) dalam Bahasa Indonesia.
+            Berikan rekomendasi singkat (2–3 kalimat) dalam Bahasa Indonesia.
             Gunakan bahasa yang hangat, tidak menghakimi, dan praktis.
       ";
 
