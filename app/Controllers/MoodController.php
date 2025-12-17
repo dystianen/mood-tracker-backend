@@ -2,6 +2,8 @@
 
 namespace App\Controllers;
 
+use App\Libraries\GeminiApi;
+use App\Models\MoodRecommendationModel;
 use Ramsey\Uuid\Uuid;
 use CodeIgniter\RESTful\ResourceController;
 
@@ -9,6 +11,12 @@ class MoodController extends ResourceController
 {
   protected $modelName = 'App\Models\MoodModel';
   protected $format    = 'json';
+  protected $recommendationModel;
+
+  public function __construct()
+  {
+    $this->recommendationModel = new MoodRecommendationModel();
+  }
 
   private function standardResponse($data = null, $message = '', $status = 'success', $httpCode = 200)
   {
@@ -18,6 +26,20 @@ class MoodController extends ResourceController
       'data' => $data
     ], $httpCode);
   }
+
+  private function invalidateRecommendation($date)
+  {
+    $userId = $this->request->user->sub;
+    $month = date('m', strtotime($date));
+    $year  = date('Y', strtotime($date));
+
+    $this->recommendationModel
+      ->where('user_id', $userId)
+      ->where('month', $month)
+      ->where('year', $year)
+      ->delete();
+  }
+
 
   public function index()
   {
@@ -39,7 +61,8 @@ class MoodController extends ResourceController
       return $this->standardResponse(null, 'Mood untuk tanggal ini sudah ada', 'error', 409);
     }
 
-    $insertedId = $this->model->insert([
+    $this->invalidateRecommendation($data['date']);
+    $this->model->insert([
       'user_id' => $userId,
       'date'   => $data['date'],
       'color'  => $data['color'],
@@ -47,7 +70,7 @@ class MoodController extends ResourceController
       'note'   => $data['note'],
     ]);
 
-    return $this->standardResponse(['id' => $insertedId], 'Mood berhasil disimpan', 'success', 201);
+    return $this->standardResponse(null, 'Mood berhasil disimpan', 'success', 201);
   }
 
   public function show($id = null)
@@ -72,6 +95,7 @@ class MoodController extends ResourceController
       return $this->standardResponse(null, 'Mood tidak ditemukan', 'error', 404);
     }
 
+    $this->invalidateRecommendation($data['date']);
     $this->model->update($id, $data);
     return $this->standardResponse(null, 'Mood berhasil diperbarui');
   }
@@ -90,9 +114,9 @@ class MoodController extends ResourceController
 
   public function recommendation()
   {
-    $userId =  $this->request->user->sub;
+    $userId = $this->request->user->sub;
     $month = service('request')->getGet('month') ?: date('m');
-    $year  = service('request')->getGet('year') ?: date('Y');
+    $year = service('request')->getGet('year') ?: date('Y');
 
     if (!$month || !$year) {
       return $this->respond([
@@ -101,6 +125,26 @@ class MoodController extends ResourceController
       ], 400);
     }
 
+    /**
+     * =====================================================
+     * 1️⃣ CEK CACHE (DATABASE)
+     * =====================================================
+     */
+    $existing = $this->recommendationModel
+      ->where('user_id', $userId)
+      ->where('month', $month)
+      ->where('year', $year)
+      ->first();
+
+    if ($existing) {
+      return $this->standardResponse($existing, 'Rekomendasi berhasil ditampilkan');
+    }
+
+    /**
+     * =====================================================
+     * 2️⃣ AMBIL DATA MOOD
+     * =====================================================
+     */
     $data = $this->model
       ->where('user_id', $userId)
       ->where('MONTH(date)', $month)
@@ -111,11 +155,15 @@ class MoodController extends ResourceController
     if (empty($data)) {
       return $this->standardResponse(
         null,
-        'Belum ada catatan mood untuk periode ini. Mulai isi mood harian kamu agar sistem dapat memberikan laporan dan rekomendasi yang lebih akurat.'
+        'Belum ada catatan mood untuk periode ini.'
       );
     }
 
-    // Mapping mood ke nilai
+    /**
+     * =====================================================
+     * 3️⃣ ANALISIS (RULE BASED)
+     * =====================================================
+     */
     $moodValue = [
       'Sangat Senang' => 5,
       'Senang'        => 4,
@@ -131,35 +179,81 @@ class MoodController extends ResourceController
       }
     }
 
-
-    $avg = array_sum($values) / count($values);
+    $avg      = array_sum($values) / count($values);
     $lowDays = count(array_filter($values, fn($v) => $v <= 2));
 
-    // RULE BASED RECOMMENDATION
     if ($avg >= 4) {
       $level = 'good';
-      $recommendation =
-        'Mood kamu secara umum sangat baik. Pertahankan rutinitas positif dan aktivitas yang membuatmu bahagia.';
+      $ruleRecommendation =
+        'Mood kamu secara umum sangat baik. Pertahankan rutinitas positif yang sudah berjalan.';
     } elseif ($avg >= 3) {
       $level = 'neutral';
-      $recommendation =
-        'Mood kamu cukup stabil. Tetap jaga keseimbangan antara pekerjaan dan waktu istirahat.';
+      $ruleRecommendation =
+        'Mood kamu cukup stabil. Tetap jaga keseimbangan antara aktivitas dan waktu istirahat.';
     } else {
       $level = 'bad';
-      $recommendation =
-        'Mood kamu cenderung rendah. Disarankan untuk berbicara dengan orang terpercaya atau profesional.';
+      $ruleRecommendation =
+        'Mood kamu cenderung rendah. Coba beri ruang untuk istirahat dan berbagi cerita dengan orang terpercaya.';
     }
 
-    if ($lowDays >= 5) {
-      $recommendation .=
-        ' Karena terdapat beberapa hari dengan mood rendah, pertimbangkan untuk berkonsultasi dengan psikolog.';
+    /**
+     * =====================================================
+     * 4️⃣ GEMINI (OPTIONAL / ENHANCER)
+     * =====================================================
+     */
+    $finalRecommendation = $ruleRecommendation;
+    $source = 'rule';
+
+    try {
+      $gemini = new GeminiApi();
+
+      $prompt = "
+            Kamu adalah asisten kesehatan mental yang suportif dan empatik.
+
+            Ringkasan kondisi pengguna:
+            - Rata-rata mood: {$avg}
+            - Hari dengan mood rendah: {$lowDays}
+            - Kategori kondisi: {$level}
+
+            Berikan rekomendasi singkat (1–2 kalimat) dalam Bahasa Indonesia.
+            Gunakan bahasa yang hangat, tidak menghakimi, dan praktis.
+      ";
+
+      $aiRecommendation = $gemini->generate($prompt);
+
+      if (!empty($aiRecommendation)) {
+        $finalRecommendation = trim($aiRecommendation);
+        $source = 'ai';
+      }
+    } catch (\Throwable $e) {
+      // sengaja dikosongkan → fallback rule-based
     }
 
-    return $this->standardResponse([
+    /**
+     * =====================================================
+     * 5️⃣ SIMPAN KE DATABASE
+     * =====================================================
+     */
+    $payload = [
+      'user_id' => $userId,
+      'month' => $month,
+      'year' => $year,
       'average_mood' => round($avg, 1),
       'low_mood_days' => $lowDays,
       'level' => $level,
-      'recommendation' => $recommendation,
-    ], 'Rekomendasi berhasil ditampilkan');
+      'recommendation' => $finalRecommendation,
+      'source' => $source,
+      'prompt_version' => 'v1',
+      'created_at' => date('Y-m-d H:i:s'),
+    ];
+
+    $this->recommendationModel->insert($payload);
+
+    /**
+     * =====================================================
+     * 6️⃣ RESPONSE
+     * =====================================================
+     */
+    return $this->standardResponse($payload, 'Rekomendasi berhasil ditampilkan');
   }
 }
