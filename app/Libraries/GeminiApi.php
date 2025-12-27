@@ -35,6 +35,10 @@ class GeminiApi
     curl_close($ch);
 
     $json = json_decode($result, true);
+    log_message('debug', 'Gemini response: ' . json_encode($json, JSON_PRETTY_PRINT));
+
+
+    log_message('debug', 'Gemini raw response: ' . $result);
 
     return $json['candidates'][0]['content']['parts'][0]['text'] ?? null;
   }

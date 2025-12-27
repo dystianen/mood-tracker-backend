@@ -239,6 +239,8 @@ class MoodController extends ResourceController
 
       $aiRecommendation = $gemini->generate($prompt);
 
+      log_message('debug', 'aiRecommendation raw response: ' . $aiRecommendation);
+
       if (!empty($aiRecommendation)) {
         $finalRecommendation = trim($aiRecommendation);
         $source = 'ai';
